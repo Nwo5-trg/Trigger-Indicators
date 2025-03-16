@@ -181,14 +181,14 @@ class $modify(Editor, LevelEditorLayer) {
                 auto objPos = obj->getPosition();
                 drawNode->drawSegment(ccp(triggerPos.x + 10, triggerPos.y - 5), ccp(objPos.x - 10, objPos.y - 5), width, getColorFromID(trigger->m_objectID, true, alpha));
                 drawExtraNode->drawPolygon((CCPoint[3]){ccp(triggerPos.x + 8, triggerPos.y - 2.5), ccp(triggerPos.x + 8, triggerPos.y - 7.5),
-                ccp(triggerPos.x + 12, triggerPos.y - 5)}, 3, ccColor4F(1, 1, 1, 1), 0.45, ccColor4F(0, 0, 0, 1));
-                drawExtraNode->drawCircle(ccp(objPos.x - 10, objPos.y - 5), 2, ccColor4F(1, 1, 1, 1), 0.5, ccColor4F(0, 0, 0, 1), 32);
+                ccp(triggerPos.x + 12, triggerPos.y - 5)}, 3, ccColor4F{1, 1, 1, 1}, 0.45, ccColor4F{0, 0, 0, 1});
+                drawExtraNode->drawCircle(ccp(objPos.x - 10, objPos.y - 5), 2, ccColor4F{1, 1, 1, 1}, 0.5, ccColor4F{0, 0, 0, 1}, 32);
                 return;
             }
         }
         if (objOverride != ccp(0, 0)) {
             auto col = getColorFromID(trigger->m_objectID, true, alpha);
-            drawNode->drawRect(ccp(lowestPoint.x - (15 + width), lowestPoint.y - (15 + width)), ccp(highestPoint.x + (15 + width), highestPoint.y + (15 + width)), ccColor4F(0, 0, 0, 0), width, col);
+            drawNode->drawRect(ccp(lowestPoint.x - (15 + width), lowestPoint.y - (15 + width)), ccp(highestPoint.x + (15 + width), highestPoint.y + (15 + width)), ccColor4F{0, 0, 0, 0}, width, col);
             drawNode->drawSegment(trigger->getPosition(), ccp(lowestPoint.x + ((highestPoint.x - lowestPoint.x) / 2), highestPoint.y + (15 + width)), width, col);
         } 
         else drawNode->drawSegment(trigger->getPosition(), obj->getPosition(), 1, getColorFromID(trigger->m_objectID, true, alpha));
@@ -196,12 +196,10 @@ class $modify(Editor, LevelEditorLayer) {
 
     ccColor4F getColorFromID(int id, bool multiplyAlpha, float alpha) {
         if (auto entry = colorMap.find(id); entry != colorMap.end()) {
-            ccColor4F col = {entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha};
-            if (multiplyAlpha) return col;
+            if (multiplyAlpha) return ccColor4F{entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha};
             return entry->second;
         }
-        ccColor4F col = {1, 1, 1, 1 * alpha};
-        return col;
+        return ccColor4F{1, 1, 1, 1 * alpha};
     }
 
     std::unordered_set<int> getBlacklistedGroups() {
