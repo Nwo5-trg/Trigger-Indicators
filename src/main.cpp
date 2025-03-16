@@ -199,7 +199,8 @@ class $modify(Editor, LevelEditorLayer) {
             if (multiplyAlpha) return ccColor4F(entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha);
             return entry->second;
         }
-        return ccColor4F(1, 1, 1, 1 * alpha);
+        ccColor4F defaultCol = {1, 1, 1, 1 * alpha};
+        return defaultCol;
     }
 
     std::unordered_set<int> getBlacklistedGroups() {
@@ -276,7 +277,7 @@ class $modify(EditUI, EditorUI) {
         bool updateMoveLock = false;
     };
 
-    void selectObject(GameObject* p0, bool p1) {
+    void selectObject(GameObject* p0, bool p1) { //test with update buttons to replace hese and make undo/redo work
         EditorUI::selectObject(p0, p1);
         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
     }
@@ -295,12 +296,11 @@ class $modify(EditUI, EditorUI) {
         EditorUI::moveObject(p0, p1);
         if (!m_fields->updateMoveLock) {
             m_fields->updateMoveLock = true;
-            CCDirector::sharedDirector()->getScheduler()->scheduleSelector(
-            schedule_selector(EditUI::delayedUpdateAllIndicators), this, 0, false, 0, false);
+            this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
         }
     }
 
-    void delayedUpdateAllIndicators() { // so moving crazy amounts of objects doesnt make the game cry
+    void delayedUpdateAllIndicators(float dt) { // so moving crazy amounts of objects doesnt make the game cry
         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
         m_fields->updateMoveLock = false;
     }
