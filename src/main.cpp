@@ -196,11 +196,12 @@ class $modify(Editor, LevelEditorLayer) {
 
     ccColor4F getColorFromID(int id, bool multiplyAlpha, float alpha) {
         if (auto entry = colorMap.find(id); entry != colorMap.end()) {
-            if (multiplyAlpha) return ccColor4F(entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha);
+            ccColor4F col = {entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha};
+            if (multiplyAlpha) return col;
             return entry->second;
         }
-        ccColor4F defaultCol = {1, 1, 1, 1 * alpha};
-        return defaultCol;
+        ccColor4F col = {1, 1, 1, 1 * alpha};
+        return col;
     }
 
     std::unordered_set<int> getBlacklistedGroups() {
