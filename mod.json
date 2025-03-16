@@ -1,0 +1,68 @@
+{
+	"geode": "4.2.0",
+	"gd": {
+		"win": "2.2074",
+		"android": "2.2074",
+		"mac": "2.2074"
+	},
+	"id": "nwo5.trigger_indicators",
+	"name": "Trigger Indicators",
+	"version": "v0.1.0-alpha.1",
+	"developer": "Nwo5",
+	"description": "Indicators showing what triggers activate.",
+	"tags": ["offline", "editor", "enhancement", "utility"],
+	"links": {"source": "https://github.com/Nwo5-trg/Trigger-Indicators"},
+	"settings": {
+		"line-label": {
+			"type": "title",
+			"name": "Line"
+		},
+		"line-width": {
+			"type": "float",
+			"name": "Line Width",
+			"default": 1,
+			"min": 0.1,
+			"max": 10
+		},
+		"line-opacity-multiplier": {
+			"type": "float",
+			"name": "Line Opacity Multiplier",
+			"default": 1,
+			"min": 0,
+			"max": 1
+		},
+		"general-label": {
+			"type": "title",
+			"name": "General"
+		},
+		"enable-group-blacklist": {
+			"type": "bool",
+			"name": "Enable Group Blacklist",
+			"default": false
+		},
+		"group-blacklist": {
+			"type": "string",
+			"name": "Group Blacklist",
+			"default": "1,2,3,4,5",
+			"description": "Seperate groups with commas.",
+			"filter": "1234567890,",
+			"enable-if": "enable-group-blacklist"
+		},
+		"max-x-distance": {
+			"type": "float",
+			"name": "Max X Distance",
+			"default": 500,
+			"description": "Max distance an object can be from a trigger before lines stop rendering (lines render no matter the distance when the trigger is selected)",
+			"min": 1,
+			"max": 10000
+		},
+		"max-y-distance": {
+			"type": "float",
+			"name": "Max Y Distance",
+			"default": 500,
+			"description": "Max distance an object can be from a trigger before lines stop rendering (lines render no matter the distance when the trigger is selected)",
+			"min": 1,
+			"max": 10000
+		}
+	}
+}
