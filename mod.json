@@ -7,7 +7,7 @@
 	},
 	"id": "nwo5.trigger_indicators",
 	"name": "Trigger Indicators",
-	"version": "v0.1.0-alpha.1",
+	"version": "v0.1.0-alpha.2",
 	"developer": "Nwo5",
 	"description": "Indicators showing what triggers activate.",
 	"tags": ["offline", "editor", "enhancement", "utility"],

@@ -40,7 +40,7 @@ std::unordered_map<int, ccColor4F> colorMap = {
     {3609, {0.325, 0.749, 1, 1}}, {1812, {0.8, 0.396, 0.396, 1}}, {3600, {0, 0, 0, 1}},  
     {3022, {0.408, 0.886, 1, 1}}, {2902, {0.408, 0.886, 1, 1}}, {2905, {0.498, 0.498, 0.498, 0.498}},  
     {2907, {0.498, 0.498, 0.498, 0.498}}, {2913, {0.498, 0.498, 0.498, 0.498}}, {2915, {0.498, 0.498, 0.498, 0.498}},  
-    {2916, {0.498, 0.498, 0.498, 0.498}}  
+    {2916, {0.498, 0.498, 0.498, 0.498}}, {10001, {0, 1, 0.498, 1}}
 };
 
 
@@ -50,11 +50,16 @@ class $modify(Editor, LevelEditorLayer) {
         int group, centerGroup, modCenterGroup, rotationTargetGroup; // apparently u can do this but idk if its the same for fields
     };
 
+    struct ObjData {
+        GameObject* obj;
+        std::unordered_set<short> groups;
+    };
+
     struct Fields {
         CCLayer* indicatorRenderLayer;
         CCLayer* indicatorRenderLayerExtra;
         CCLayer* batchLayer;
-        std::vector<TriggerData> triggers;
+        std::vector<ObjData> objects;
         std::unordered_set<int> groupBlacklist;
         CCDrawNode* drawNode;
         CCDrawNode* drawExtraNode;
@@ -100,15 +105,7 @@ class $modify(Editor, LevelEditorLayer) {
             indicatorRenderLayerExtra->addChild(drawExtraNode);
             drawNode->setPosition(ccp(0, 0));
 
-            auto objs = this->m_objects;
-            auto fields = m_fields.self();
-            for (int i = 0; i < objs->count(); i++) {
-                if (auto obj = typeinfo_cast<EffectGameObject*>(objs->objectAtIndex(i))) {
-                    if (obj->m_isTrigger && !triggerTypeBlacklist.contains(obj->m_objectID)) {
-                        fields->triggers.emplace_back(getData(obj));
-                    }
-                }
-            }
+            updateObjectsList();
             m_fields->indicatorUpdateLock = false;
             updateAllIndicators();
         return true;
@@ -128,78 +125,86 @@ class $modify(Editor, LevelEditorLayer) {
         auto maxXDif = fields->maxXDif;
         auto maxYDif = fields->maxYDif;
 
-       auto selectedObj = EditorUI::get()->getSelectedObjects()->objectAtIndex(0);
+        auto selectedObj = EditorUI::get()->getSelectedObjects()->objectAtIndex(0);
 
-        for (auto& trigger : fields->triggers) {
-            auto triggerObj = trigger.obj;
-            trigger = getData(triggerObj);
-            CCArray groupObjects;
-            if (fields->groupBlacklist.contains(trigger.group)) continue;
-            for (int i = 0; i < m_objects->count(); i++) {
-                auto obj = static_cast<GameObject*>(m_objects->objectAtIndex(i));
-                if (fields->triggerOnlyMode) {
-                    if (auto objAsTrigger = typeinfo_cast<EffectGameObject*>(obj)) {
-                        if (!(objAsTrigger->m_isTrigger && !triggerTypeBlacklist.contains(obj->m_objectID))) continue;
-                    } else continue;
-                }
-                if (!obj || !obj->m_groups) continue; // gotta test whats needed and what isnt
-                if ((std::abs(triggerObj->getPosition().x - obj->getPosition().x) < maxXDif && std::abs(triggerObj->getPosition().y - obj->getPosition().y) < maxYDif) || selectedObj == triggerObj) {
-                    auto& groups = *obj->m_groups; //according to gpt-san not using a pointer is better so
-                    if (groups.empty()) continue;
-                    if ((trigger.group != 0 && std::find(groups.begin(), groups.end(), trigger.group) != groups.end()) || 
-                    (trigger.centerGroup != 0 && std::find(groups.begin(), groups.end(), trigger.centerGroup) != groups.end()) ||
-                    (trigger.modCenterGroup != 0 && std::find(groups.begin(), groups.end(), trigger.modCenterGroup) != groups.end()) || 
-                    (trigger.rotationTargetGroup != 0 && std::find(groups.begin(), groups.end(), trigger.rotationTargetGroup) != groups.end())) groupObjects.addObject(obj);
-                }
-            }
-            if (groupObjects.count() != 0) {
-                if (true != true) {
-                    for (int i = 0; i < groupObjects.count(); i++) {
-                        drawLine(triggerObj, static_cast<GameObject*>(groupObjects.objectAtIndex(i)), drawNode, drawExtraNode, ccp(0, 0), ccp(0, 0), ccp(0, 0), lineWidth, lineAlpha);
+        for (int currentTrigger = 0; currentTrigger < m_drawGridLayer->m_effectGameObjects->count(); currentTrigger++) {
+            auto trigger = static_cast<EffectGameObject*>(m_drawGridLayer->m_effectGameObjects->objectAtIndex(currentTrigger));
+            if (!trigger) continue;
+            auto triggerPos = trigger->getPosition();
+            auto triggerData = getTriggerData(trigger);
+            std::vector<CCObject*> groupObjects;
+            if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.group))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj);
+            if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.centerGroup))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj); // will eventually be moved to a new vector but for now its fine
+            if (trigger->m_objectID == 3607 || trigger->m_objectID == 2068) {
+                if (auto chanceTrigger = typeinfo_cast<ChanceTriggerGameObject*>(trigger)) {
+                    for (auto& chanceObj : chanceTrigger->m_chanceObjects) {
+                        if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(chanceObj.m_groupID))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj);
                     }
+                } 
+            }
+            std::erase_if(groupObjects, [&] (CCObject* currentObj) { // did not know this existed
+                auto obj = static_cast<GameObject*>(currentObj);
+                auto objPos = obj->getPosition();
+                if (obj == selectedObj) return false;
+                return !((std::abs(triggerPos.x - objPos.x) < maxXDif && std::abs(triggerPos.y - objPos.y) < maxYDif));
+            });
+            if (groupObjects.size() != 0) {
+                if (true != true) { // draw lines individually, temp
+                    for (auto& currentObj : groupObjects) drawLine(trigger, static_cast<GameObject*>(currentObj), drawNode, drawExtraNode, ccp(0, 0), ccp(0, 0), ccp(0, 0), lineWidth, lineAlpha);
                 } else {
                     CCArray centerArray;
-                    for (int i = 0; i < groupObjects.count(); i++) {
-                        if (auto obj = typeinfo_cast<EffectGameObject*>(groupObjects.objectAtIndex(i))) {
-                            drawLine(triggerObj, obj, drawNode, drawExtraNode, ccp(0, 0), ccp(0, 0), ccp(0, 0), lineWidth, lineAlpha);
-                        } else centerArray.addObject(groupObjects.objectAtIndex(i));
+                    for (auto& currentObj : groupObjects) {
+                        auto obj = typeinfo_cast<EffectGameObject*>(currentObj);
+                        if (obj && !triggerTypeBlacklist.contains(obj->m_objectID)) {
+                            drawLine(trigger, obj, drawNode, drawExtraNode, ccp(0, 0), ccp(0, 0), ccp(0, 0), lineWidth, lineAlpha);
+                        } else centerArray.addObject(currentObj);
                     }
                     if (centerArray.count() != 0) {
                         CCPoint center = EditorUI::get()->getGroupCenter(&centerArray, true);
-                        drawLine(triggerObj, centerArray.count() > 1 ? nullptr : static_cast<GameObject*>(centerArray.objectAtIndex(0)), drawNode, drawExtraNode, 
+                        drawLine(trigger, static_cast<GameObject*>(centerArray.objectAtIndex(0)), drawNode, drawExtraNode, 
                         centerArray.count() > 1 ? (EditorUI::get()->getGroupCenter(&centerArray, true)) : ccp(0, 0), getLowestPoint(&centerArray), getHighestPoint(&centerArray), lineWidth, lineAlpha);
                     }
                 }
             }
         }
     }   
-    
-    void drawLine(GameObject* trigger, GameObject* obj, CCDrawNode* drawNode, CCDrawNode* drawExtraNode, CCPoint objOverride, CCPoint lowestPoint, CCPoint highestPoint, float width, float alpha) {
+
+    void drawLine(EffectGameObject* trigger, GameObject* obj, CCDrawNode* drawNode, CCDrawNode* drawExtraNode, CCPoint objOverride, CCPoint lowestPoint, CCPoint highestPoint, float width, float alpha) {
+        auto triggerLayer = trigger->m_editorLayer;
+        auto objLayer = obj->m_editorLayer;
+        auto triggerLayer2 = trigger->m_editorLayer2;
+        auto objLayer2 = obj->m_editorLayer2;
+        auto currentLayer = m_currentLayer;
+        auto layerAlpha = alpha * (currentLayer == -1 || (((objLayer == currentLayer && objLayer == triggerLayer) || (objLayer2 == currentLayer && objLayer2 == triggerLayer2 && currentLayer != 0)))? 1.0f : 0.5f);
+        auto triggerID = trigger->m_objectID;
+        if (triggerID == 1049 && trigger->m_activateGroup) triggerID = 10001;
+        auto col = getColorFromID(triggerID, true, layerAlpha);
         if (auto trigger2 = typeinfo_cast<EffectGameObject*>(obj)) {
             if (trigger2->m_isTrigger && !triggerLineTypeBlacklist.contains(obj->m_objectID)) {
                 auto triggerPos = trigger->getPosition();
                 auto objPos = obj->getPosition();
-                drawNode->drawSegment(ccp(triggerPos.x + 10, triggerPos.y - 5), ccp(objPos.x - 10, objPos.y - 5), width, getColorFromID(trigger->m_objectID, true, alpha));
-                drawExtraNode->drawPolygon((CCPoint[3]){ccp(triggerPos.x + 8, triggerPos.y - 2.5), ccp(triggerPos.x + 8, triggerPos.y - 7.5),
-                ccp(triggerPos.x + 12, triggerPos.y - 5)}, 3, ccColor4F{1, 1, 1, 1}, 0.45, ccColor4F{0, 0, 0, 1});
-                drawExtraNode->drawCircle(ccp(objPos.x - 10, objPos.y - 5), 2, ccColor4F{1, 1, 1, 1}, 0.5, ccColor4F{0, 0, 0, 1}, 32);
+                auto triggerScale = trigger->getScale();
+                auto objScale = obj->getScale();
+                drawNode->drawSegment(ccp(triggerPos.x + (10 * triggerScale), triggerPos.y - (5 * triggerScale)), ccp(objPos.x - (10 * objScale), objPos.y - (5 * objScale)), width, col);
+                drawExtraNode->drawPolygon((CCPoint[3]){ccp(triggerPos.x + (8 * triggerScale), triggerPos.y - (2.5 * triggerScale)), ccp(triggerPos.x + (8 * triggerScale), triggerPos.y - (7.5 * triggerScale)),
+                ccp(triggerPos.x + (12 * triggerScale), triggerPos.y - (5 * triggerScale))}, 3, ccColor4F{1, 1, 1, 1}, 0.45 * triggerScale, ccColor4F{0, 0, 0, 1});
+                drawExtraNode->drawCircle(ccp(objPos.x - (10 * objScale), objPos.y - (5 * objScale)), 2 * objScale, ccColor4F{1, 1, 1, 1}, 0.5 * objScale, ccColor4F{0, 0, 0, 1}, 32);
                 return;
             }
         }
         if (objOverride != ccp(0, 0)) {
-            auto col = getColorFromID(trigger->m_objectID, true, alpha);
             drawNode->drawRect(ccp(lowestPoint.x - (15 + width), lowestPoint.y - (15 + width)), ccp(highestPoint.x + (15 + width), highestPoint.y + (15 + width)), ccColor4F{0, 0, 0, 0}, width, col);
             drawNode->drawSegment(trigger->getPosition(), ccp(lowestPoint.x + ((highestPoint.x - lowestPoint.x) / 2), highestPoint.y + (15 + width)), width, col);
         } 
-        else drawNode->drawSegment(trigger->getPosition(), obj->getPosition(), 1, getColorFromID(trigger->m_objectID, true, alpha));
+        else drawNode->drawSegment(trigger->getPosition(), obj->getPosition(), 1, col);
     }
 
     ccColor4F getColorFromID(int id, bool multiplyAlpha, float alpha) {
         if (auto entry = colorMap.find(id); entry != colorMap.end()) {
-            if (multiplyAlpha) return ccColor4F{entry->second.r, entry->second.g, entry->second.b, entry->second.a * alpha};
+            if (multiplyAlpha) return ccColor4F{entry->second.r, entry->second.g, entry->second.b, entry->second.a * (multiplyAlpha ? alpha : 1)};
             return entry->second;
         }
-        return ccColor4F{1, 1, 1, 1 * alpha};
+        return ccColor4F{1, 1, 1, 1 * (multiplyAlpha ? alpha : 1)};
     }
 
     std::unordered_set<int> getBlacklistedGroups() {
@@ -213,9 +218,33 @@ class $modify(Editor, LevelEditorLayer) {
         return blacklist;
     }
 
-    TriggerData getData(EffectGameObject* obj) {
-        return {obj, obj->m_targetGroupID, obj->m_centerGroupID,
-        obj->m_targetModCenterID, obj->m_rotationTargetID};
+    void updateObjectsList() {
+        auto fields = m_fields.self();
+        auto objs = this->m_objects;
+        fields->objects.clear();
+        for (int i = 0; i < objs->count(); i++) {
+            auto obj = static_cast<GameObject*>(objs->objectAtIndex(i));
+            auto groups = obj->m_groups;
+            if (!obj || !obj->m_groups) continue;
+            if (!(groups->at(0) == 0)) {
+                std::unordered_set<short> groupSet;
+                for (int i = 0; i < groups->size(); i++) { // p sure i cant make a function for this cuz the arrays size value is unknown
+                    groupSet.insert(groups->at(i));
+                }
+                if (fields->objects.size() == 0) fields->objects.emplace_back(ObjData{obj, groupSet});
+                for (int i2 = 0; i2 < fields->objects.size(); i2++) {
+                    if (!(fields->objects[i2].obj == obj)) {
+                        fields->objects.emplace_back(ObjData{obj, groupSet});
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    TriggerData getTriggerData(EffectGameObject* obj) {
+        return {obj, obj->m_targetGroupID == 0 ? -1 : obj->m_targetGroupID, obj->m_centerGroupID == 0 ? -1 : obj->m_centerGroupID, 
+        obj->m_targetModCenterID == 0 ? -1 : obj->m_targetModCenterID, obj->m_rotationTargetID == 0 ? -1 : obj->m_rotationTargetID};
     }
 
     CCPoint getLowestPoint (CCArray* objs) {
@@ -223,12 +252,8 @@ class $modify(Editor, LevelEditorLayer) {
         for (int i = 0; i < objs->count(); i++) {
             auto obj = static_cast<GameObject*>(objs->objectAtIndex(i));
             auto pos = obj->getPosition();
-            if (pos.x < lowestPoint.x) {
-                lowestPoint = ccp(pos.x, lowestPoint.y);
-            }
-            if (pos.y < lowestPoint.y) {
-                lowestPoint = ccp(lowestPoint.x, pos.y);
-            }
+            if (pos.x < lowestPoint.x) lowestPoint = ccp(pos.x, lowestPoint.y);
+            if (pos.y < lowestPoint.y) lowestPoint = ccp(lowestPoint.x, pos.y);
         }
         return lowestPoint;
     }
@@ -238,89 +263,82 @@ class $modify(Editor, LevelEditorLayer) {
         for (int i = 0; i < objs->count(); i++) {
             auto obj = static_cast<GameObject*>(objs->objectAtIndex(i));
             auto pos = obj->getPosition();
-            if (pos.x > highestPoint.x) {
-                highestPoint = ccp(pos.x, highestPoint.y);
-            }
-            if (pos.y > highestPoint.y) {
-                highestPoint = ccp(highestPoint.x, pos.y);
-            }
+            if (pos.x > highestPoint.x) highestPoint = ccp(pos.x, highestPoint.y);
+            if (pos.y > highestPoint.y) highestPoint = ccp(highestPoint.x, pos.y);
         }
         return highestPoint;
     }
 
-    GameObject* createObject(int p0, CCPoint p1, bool p2) {
-        auto ret = LevelEditorLayer::createObject(p0, p1, p2);
-        if (auto obj = typeinfo_cast<EffectGameObject*>(ret)) {
-            if (obj->m_isTrigger && !obj->m_isStartPos) m_fields->triggers.emplace_back(getData(obj));
-        }
-        return ret;
-    }
+    // GameObject* createObject(int p0, CCPoint p1, bool p2) {
+    //     auto ret = LevelEditorLayer::createObject(p0, p1, p2);
+    //     updateObjectsList();
+    //     updateAllIndicators();
+    //     return ret;
+    // }
 
-    void removeObject(GameObject* p0, bool p1) {
-        if (auto obj = typeinfo_cast<EffectGameObject*>(p0)) {
-            auto& triggers = m_fields->triggers;
-            for (int i = 0; i < triggers.size(); i++) {
-                if (triggers[i].obj == p0) {
-                    triggers.erase(triggers.begin() + i);
-                    break;
-                }
-            }
-        }
-        LevelEditorLayer::removeObject(p0, p1);
+    // void removeObject(GameObject* p0, bool p1) {
+    //     updateObjectsList();
+    //     LevelEditorLayer::removeObject(p0, p1);
+    //     updateAllIndicators();
+    // }
+
+    void updateEditor(float p0) {
+        LevelEditorLayer::updateEditor(p0);
+        updateObjectsList();
         updateAllIndicators();
     }
 };
 
-class $modify(EditUI, EditorUI) {
-    struct Fields {
-        bool updateMoveLock = false;
-    };
+// class $modify(EditUI, EditorUI) {
+//     struct Fields {
+//         bool updateMoveLock = false;
+//     };
 
-    void selectObject(GameObject* p0, bool p1) { //test with update buttons to replace hese and make undo/redo work
-        EditorUI::selectObject(p0, p1);
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
-    }
+//     void selectObject(GameObject* p0, bool p1) { //test with update buttons to replace hese and make undo/redo work
+//         EditorUI::selectObject(p0, p1);
+//         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+//     }
 
-    void deselectObject(GameObject* p0) {
-        EditorUI::deselectObject(p0);
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
-    }
+//     void deselectObject(GameObject* p0) {
+//         EditorUI::deselectObject(p0);
+//         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+//     }
 
-    void deselectAll() {
-        EditorUI::deselectAll();
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
-    }
+//     void deselectAll() {
+//         EditorUI::deselectAll();
+//         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+//     }
 
-    void moveObject(GameObject* p0, CCPoint p1) {
-        EditorUI::moveObject(p0, p1);
-        if (!m_fields->updateMoveLock) {
-            m_fields->updateMoveLock = true;
-            this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
-        }
-    }
+//     void moveObject(GameObject* p0, CCPoint p1) {
+//         EditorUI::moveObject(p0, p1);
+//         if (!m_fields->updateMoveLock) {
+//             m_fields->updateMoveLock = true;
+//             this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
+//         }
+//     }
 
-    void delayedUpdateAllIndicators(float dt) { // so moving crazy amounts of objects doesnt make the game cry
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
-        m_fields->updateMoveLock = false;
-    }
-};
+//     void delayedUpdateAllIndicators(float dt) { // so moving crazy amounts of objects doesnt make the game cry
+//         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+//         m_fields->updateMoveLock = false;
+//     }
+// };
 
-class $modify(Obj, GameObject) {
-    int addToGroup(int p0) {
-        auto ret = GameObject::addToGroup(p0);
-        if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
-        return ret;
-    }
+// class $modify(Obj, GameObject) {
+//     int addToGroup(int p0) {
+//         auto ret = GameObject::addToGroup(p0);
+//         if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
+//         return ret;
+//     }
 
-    void removeFromGroup(int p0) {
-        GameObject::removeFromGroup(p0);
-        if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
-    }
-};
+//     void removeFromGroup(int p0) {
+//         GameObject::removeFromGroup(p0);
+//         if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
+//     }
+// };
 
-class $modify(TriggerPopup, SetupTriggerPopup) { //workaround cuz i cant find the function for "effectgameobjectchangedthefuckinggroupsitactivatesorsomethingidk"
-    void onClose(CCObject* sender) {
-        SetupTriggerPopup::onClose(sender);
-        if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
-    }
-};
+// class $modify(TriggerPopup, SetupTriggerPopup) { //workaround cuz i cant find the function for "effectgameobjectchangedthefuckinggroupsitactivatesorsomethingidk"
+//     void onClose(CCObject* sender) {
+//         SetupTriggerPopup::onClose(sender);
+//         if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
+//     }
+// };
