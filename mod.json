@@ -1,5 +1,5 @@
 {
-	"geode": "4.2.0",
+	"geode": "4.3.0",
 	"gd": {
 		"win": "2.2074",
 		"android": "2.2074",
@@ -7,38 +7,29 @@
 	},
 	"id": "nwo5.trigger_indicators",
 	"name": "Trigger Indicators",
-	"version": "v0.1.0-alpha.2",
+	"version": "v0.1.0-alpha.3",
 	"developer": "Nwo5",
 	"description": "Indicators showing what triggers activate.",
 	"tags": ["offline", "editor", "enhancement", "utility"],
 	"links": {"source": "https://github.com/Nwo5-trg/Trigger-Indicators"},
 	"settings": {
-		"line-label": {
+		"toggles-label": {
 			"type": "title",
-			"name": "Line"
-		},
-		"line-width": {
-			"type": "float",
-			"name": "Line Width",
-			"default": 1,
-			"min": 0.1,
-			"max": 10
-		},
-		"line-opacity-multiplier": {
-			"type": "float",
-			"name": "Line Opacity Multiplier",
-			"default": 1,
-			"min": 0,
-			"max": 1
-		},
-		"general-label": {
-			"type": "title",
-			"name": "General"
+			"name": "Toggles"
 		},
 		"enable-group-blacklist": {
 			"type": "bool",
-			"name": "Enable Group Blacklist",
+			"name": "Group Blacklist Enabled",
 			"default": false
+		},
+		"enable-trigger-only": {
+			"type": "bool",
+			"name": "Trigger Only Mode Enabled",
+			"default": false
+		},
+		"configuration-label": {
+			"type": "title",
+			"name": "Configuration"
 		},
 		"group-blacklist": {
 			"type": "string",
@@ -63,6 +54,20 @@
 			"description": "Max distance an object can be from a trigger before lines stop rendering (lines render no matter the distance when the trigger is selected)",
 			"min": 1,
 			"max": 10000
+		},
+		"line-width": {
+			"type": "float",
+			"name": "Line Width",
+			"default": 1,
+			"min": 0.1,
+			"max": 10
+		},
+		"line-opacity-multiplier": {
+			"type": "float",
+			"name": "Line Opacity Multiplier",
+			"default": 1,
+			"min": 0,
+			"max": 1
 		}
 	}
 }
