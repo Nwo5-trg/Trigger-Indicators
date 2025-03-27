@@ -54,16 +54,20 @@ class $modify(Editor, LevelEditorLayer) {
         CCLayer* indicatorRenderLayer;
         CCLayer* indicatorRenderLayerExtra;
         CCLayer* batchLayer;
-        std::unordered_set<int> groupBlacklist;
         CCDrawNode* drawNode;
         CCDrawNode* drawExtraNode;
         int lastObjectCount;
+        int maxClusterObjectCheck;
         float lineWidth;
         float lineAlpha;
         float maxXDif;
         float maxYDif;
-        bool indicatorUpdateLock = true; // stop indicators updating like a million times on editor open
+        float clusterLimit;
+        bool indicatorUpdateLock = true;
         bool triggerOnlyMode;
+        bool useClusters;
+        bool drawIndividualLines;
+        std::unordered_set<int> groupBlacklist;
     };
 
     bool init(GJGameLevel* p0, bool p1) {	
@@ -83,7 +87,7 @@ class $modify(Editor, LevelEditorLayer) {
             auto indicatorRenderLayerExtra = CCLayer::create();
             m_fields->indicatorRenderLayerExtra = indicatorRenderLayerExtra;
             indicatorRenderLayerExtra->setPosition(ccp(0.0f, 0.0f));
-            indicatorRenderLayerExtra->setZOrder(9998);
+            indicatorRenderLayerExtra->setZOrder(1500);
             indicatorRenderLayerExtra->setID("indicator-render-layer-extra");
             m_fields->batchLayer->addChild(indicatorRenderLayerExtra);
 
@@ -109,6 +113,9 @@ class $modify(Editor, LevelEditorLayer) {
 
         if (fields->indicatorUpdateLock) return;
 
+        this->scheduleOnce(schedule_selector(Editor::unlockIndicatorUpdates), 0);
+        fields->indicatorUpdateLock = true;
+
         auto drawNode = fields->drawNode;
         if (drawNode) drawNode->clear();
         auto drawExtraNode = fields->drawExtraNode;
@@ -118,55 +125,63 @@ class $modify(Editor, LevelEditorLayer) {
         auto maxXDif = fields->maxXDif;
         auto maxYDif = fields->maxYDif;
         auto triggerOnly = fields->triggerOnlyMode;
+        auto useClusters = fields->useClusters;
+        auto drawIndividualLines = fields->drawIndividualLines;
+        auto clusterLimit = fields->clusterLimit;
+        auto maxClusterObjectCheck = fields->maxClusterObjectCheck;
 
-        auto selectedObj = EditorUI::get()->getSelectedObjects()->objectAtIndex(0);
-
-        for (int currentTrigger = 0; currentTrigger < m_drawGridLayer->m_effectGameObjects->count(); currentTrigger++) {
-            auto trigger = static_cast<EffectGameObject*>(m_drawGridLayer->m_effectGameObjects->objectAtIndex(currentTrigger));
+        for (auto trigger : CCArrayExt<EffectGameObject*>(m_drawGridLayer->m_effectGameObjects)) {
             if (!trigger) continue;
             auto triggerPos = trigger->getPosition();
             auto triggerData = getTriggerData(trigger);
-            std::vector<CCObject*> groupObjects;
-            if (!(fields->groupBlacklist.contains(triggerData.group))) if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.group))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj);
-            if (!(fields->groupBlacklist.contains(triggerData.centerGroup))) if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.centerGroup))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj); // will eventually be moved to a new vector but for now its fine
+            std::vector<GameObject*> groupObjects;
+            if (!(fields->groupBlacklist.contains(triggerData.group))) if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.group))) for (auto obj : CCArrayExt<GameObject*>(array)) groupObjects.push_back(obj);
+            if (!(fields->groupBlacklist.contains(triggerData.centerGroup))) if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(triggerData.centerGroup))) for (auto obj : CCArrayExt<GameObject*>(array)) groupObjects.push_back(obj); // will eventually be moved to a new vector but for now its fine
             if (trigger->m_objectID == 3607 || trigger->m_objectID == 2068) {
                 if (auto chanceTrigger = typeinfo_cast<ChanceTriggerGameObject*>(trigger)) {
                     for (auto& chanceObj : chanceTrigger->m_chanceObjects) {
-                        if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(chanceObj.m_groupID))) for (auto obj : CCArrayExt<CCObject*>(array)) groupObjects.push_back(obj);
+                        if (auto array = static_cast<CCArray*>(m_groupDict->objectForKey(chanceObj.m_groupID))) for (auto obj : CCArrayExt<GameObject*>(array)) groupObjects.push_back(obj);
                     }
                 } 
             }
 
-            std::erase_if(groupObjects, [&] (CCObject* currentObj) { // did not know this existed
-                auto obj = static_cast<GameObject*>(currentObj);
+            std::erase_if(groupObjects, [&] (GameObject* obj) { // did not know this existed
                 auto objPos = obj->getPosition();
-                if (triggerOnly && !isTrigger(obj)) return true;
-                if (obj == selectedObj || trigger == selectedObj) return false;
+                if (triggerOnly && !isTrigger(obj, false)) return true;
+                if (obj->m_isSelected || trigger->m_isSelected) return false;
                 return !((std::abs(triggerPos.x - objPos.x) < maxXDif && std::abs(triggerPos.y - objPos.y) < maxYDif));
             });
             
             if (groupObjects.size() != 0) {
-                if (true != true) { // draw lines individually, temp
-                    for (auto& currentObj : groupObjects) drawLine(trigger, static_cast<GameObject*>(currentObj), drawNode, drawExtraNode, ccp(0.0f, 0.0f), ccp(0.0f, 0.0f), ccp(0.0f, 0.0f), lineWidth, lineAlpha);
+                if (drawIndividualLines) { // draw lines individually, temp
+                    for (auto obj : groupObjects) drawLine(trigger, obj, drawNode, drawExtraNode, ccp(0.0f, 0.0f), CCRect(0.0f, 0.0f, 0.0f, 0.0f), lineWidth, lineAlpha);
                 } else {
-                    CCArray centerArray;
-                    for (auto& currentObj : groupObjects) {
-                        auto obj = static_cast<GameObject*>(currentObj);
-                        if (isTrigger(obj)) {
-                            drawLine(trigger, obj, drawNode, drawExtraNode, ccp(0.0f, 0.0f), ccp(0.0f, 0.0f), ccp(0.0f, 0.0f), lineWidth, lineAlpha);
-                        } else centerArray.addObject(currentObj);
+                    std::vector<GameObject*> centerVector;
+                    for (auto obj : groupObjects) {
+                        if (isTrigger(obj, true)) {
+                            drawLine(trigger, obj, drawNode, drawExtraNode, ccp(0.0f, 0.0f), CCRect(0.0f, 0.0f, 0.0f, 0.0f), lineWidth, lineAlpha);
+                        } else centerVector.push_back(obj);
                     }
-                    if (centerArray.count() != 0) {
-                        CCPoint center = EditorUI::get()->getGroupCenter(&centerArray, true);
-                        drawLine(trigger, static_cast<GameObject*>(centerArray.objectAtIndex(0)), drawNode, drawExtraNode, 
-                        centerArray.count() > 1 ? (EditorUI::get()->getGroupCenter(&centerArray, true)) : ccp(0.0f, 0.0f), getLowestPoint(&centerArray), getHighestPoint(&centerArray), lineWidth, lineAlpha);
+                    if (centerVector.size() != 0) {
+                        if (useClusters && centerVector.size() <= maxClusterObjectCheck) {
+                            auto clustersVector = getClusters(centerVector, clusterLimit);
+                            for (auto currentCluster : clustersVector) {
+                                auto minMaxRect = getMinMaxRect(currentCluster);
+                                CCPoint center = ccp(minMaxRect.origin.x + (minMaxRect.size.width - minMaxRect.origin.x), minMaxRect.origin.y + (minMaxRect.size.height - minMaxRect.origin.y));
+                                drawLine(trigger, currentCluster[0], drawNode, drawExtraNode, currentCluster.size() > 1 ? center : ccp(0.0f, 0.0f), minMaxRect, lineWidth, lineAlpha);
+                            }
+                        } else {
+                            auto minMaxRect = getMinMaxRect(centerVector);
+                            CCPoint center = ccp(minMaxRect.origin.x + (minMaxRect.size.width - minMaxRect.origin.x), minMaxRect.origin.y + (minMaxRect.size.height - minMaxRect.origin.y));
+                            drawLine(trigger, centerVector[0], drawNode, drawExtraNode, centerVector.size() > 1 ? center : ccp(0.0f, 0.0f), minMaxRect, lineWidth, lineAlpha);
+                        }
                     }
                 }
             }
         }
-    }   
+    }
 
-    void drawLine(EffectGameObject* trigger, GameObject* obj, CCDrawNode* drawNode, CCDrawNode* drawExtraNode, CCPoint objOverride, CCPoint lowestPoint, CCPoint highestPoint, float width, float alpha) {
+    void drawLine(EffectGameObject* trigger, GameObject* obj, CCDrawNode* drawNode, CCDrawNode* drawExtraNode, CCPoint objOverride, CCRect minMaxRect, float width, float alpha) {
         auto triggerPos = trigger->getPosition();
         auto objPos = obj->getPosition();
         auto triggerID = trigger->m_objectID;
@@ -182,22 +197,25 @@ class $modify(Editor, LevelEditorLayer) {
         
         auto col = getColorFromID(triggerID, true, layerAlpha);
 
-        if (isTrigger(obj)) {
+        if (isTrigger(obj, true)) {
             auto triggerScale = trigger->getScale();
             auto objScale = obj->getScale();
             drawNode->drawSegment(ccp(triggerPos.x + (10.0f * triggerScale), triggerPos.y - (5.0f * triggerScale)), ccp(objPos.x - (10.0f * objScale), objPos.y - (5.0f * objScale)), width, col);
-            // draw input/output indicators
+
             drawExtraNode->drawPolygon((CCPoint[3]){ccp(triggerPos.x + (8.0f * triggerScale), triggerPos.y - (2.5f * triggerScale)), ccp(triggerPos.x + (8.0f * triggerScale), triggerPos.y - (7.5f * triggerScale)),
             ccp(triggerPos.x + (12.0f * triggerScale), triggerPos.y - (5.0f * triggerScale))}, 3, ccColor4F{1.0f, 1.0f, 1.0f, 1.0f * layerAlphaMultiplier}, 0.45f * triggerScale, ccColor4F{0.0f, 0.0f, 0.0f, 1.0f * layerAlphaMultiplier});
             drawExtraNode->drawCircle(ccp(objPos.x - (10.0f * objScale), objPos.y - (5.0f * objScale)), 2.0f * objScale, ccColor4F{1.0f, 1.0f, 1.0f, 1.0f * layerAlphaMultiplier}, 0.5f * objScale, ccColor4F{0.0f, 0.0f, 0.0f, 1.0f * layerAlphaMultiplier}, 32);
             return;
         }
         if (objOverride != ccp(0.0f, 0.0f)) {
+            auto lowestPoint = ccp(minMaxRect.origin.x, minMaxRect.origin.y);
+            auto highestPoint = ccp(minMaxRect.size.width, minMaxRect.size.height);
             lowestPoint = ccp(lowestPoint.x - (15.0f + width), lowestPoint.y - (15.0f + width));
             highestPoint = ccp(highestPoint.x + (15.0f + width), highestPoint.y + (15.0f + width));
+
             drawNode->drawRect(lowestPoint, highestPoint, ccColor4F{0.0f, 0.0f, 0.0f, 0.0f}, width, col);
             // ccp(lowestPoint.x + ((highestPoint.x - lowestPoint.x) / 2.0f), highestPoint.y + (15.0f + width))
-            drawNode->drawSegment(triggerPos, getLineCut(triggerPos, objPos, lowestPoint, highestPoint), width, col);
+            drawNode->drawSegment(triggerPos, getLineCut(triggerPos, lowestPoint, highestPoint), width, col);
         } 
         else drawNode->drawSegment(triggerPos, objPos, 1.0f, col);
     }
@@ -207,7 +225,12 @@ class $modify(Editor, LevelEditorLayer) {
         m_fields->lineAlpha = mod->getSettingValue<double>("line-opacity-multiplier");
         m_fields->maxXDif = mod->getSettingValue<double>("max-x-distance");
         m_fields->maxYDif = mod->getSettingValue<double>("max-y-distance");
+        m_fields->clusterLimit = mod->getSettingValue<double>("cluster-limit");
+        m_fields->maxClusterObjectCheck = mod->getSettingValue<int64_t>("max-cluster-object-check");
         m_fields->triggerOnlyMode = mod->getSettingValue<bool>("enable-trigger-only");
+        m_fields->useClusters =  mod->getSettingValue<bool>("enable-clustering");
+        m_fields->drawIndividualLines = mod->getSettingValue<bool>("enable-draw-individual-lines");
+        m_fields->groupBlacklist = getBlacklistedGroups();
         if (updateIndicators) updateAllIndicators();
     }
 
@@ -219,10 +242,10 @@ class $modify(Editor, LevelEditorLayer) {
         return ccColor4F{1.0f, 1.0f, 1.0f, 1.0f * (multiplyAlpha ? alpha : 1.0f)};
     }
 
-    bool isTrigger(GameObject* obj) {
+    bool isTrigger(GameObject* obj, bool useBlacklist) {
         if (!obj) return false;
         if (auto objAsTrigger = typeinfo_cast<EffectGameObject*>(obj)) {
-            if (objAsTrigger->m_isTrigger && !triggerTypeBlacklist.contains(obj->m_objectID) && !objAsTrigger->m_isStartPos) return true;
+            if (objAsTrigger->m_isTrigger && (useBlacklist ? (!triggerTypeBlacklist.contains(obj->m_objectID)) : true)) return true;
         }
         return false;
     }
@@ -243,29 +266,20 @@ class $modify(Editor, LevelEditorLayer) {
         obj->m_targetModCenterID == 0 ? -1 : obj->m_targetModCenterID, obj->m_rotationTargetID == 0 ? -1 : obj->m_rotationTargetID};
     }
 
-    CCPoint getLowestPoint (CCArray* objs) {
-        CCPoint lowestPoint = ccp(FLT_MAX, FLT_MAX);
-        for (int i = 0; i < objs->count(); i++) {
-            auto obj = static_cast<GameObject*>(objs->objectAtIndex(i));
+    CCRect getMinMaxRect (std::vector<GameObject*> objs) {
+        CCRect rect = CCRect(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (auto obj : objs) {
             auto pos = obj->getPosition();
-            if (pos.x < lowestPoint.x) lowestPoint = ccp(pos.x, lowestPoint.y);
-            if (pos.y < lowestPoint.y) lowestPoint = ccp(lowestPoint.x, pos.y);
+            if (pos.x < rect.origin.x) rect.origin.x = pos.x;
+            if (pos.y < rect.origin.y) rect.origin.y = pos.y;
+            if (pos.x > rect.size.width) rect.size.width = pos.x;
+            if (pos.y > rect.size.height) rect.size.height = pos.y;
         }
-        return lowestPoint;
+        return rect;
     }
 
-    CCPoint getHighestPoint (CCArray* objs) {
-        CCPoint highestPoint = ccp(-FLT_MAX, -FLT_MAX);
-        for (int i = 0; i < objs->count(); i++) {
-            auto obj = static_cast<GameObject*>(objs->objectAtIndex(i));
-            auto pos = obj->getPosition();
-            if (pos.x > highestPoint.x) highestPoint = ccp(pos.x, highestPoint.y);
-            if (pos.y > highestPoint.y) highestPoint = ccp(highestPoint.x, pos.y);
-        }
-        return highestPoint;
-    }
-
-    CCPoint getLineCut (CCPoint triggerPos, CCPoint centerPos, CCPoint lowestPoint, CCPoint highestPoint) { // thanks chatgpt for explaing me this shit for like an hour :sob:
+    CCPoint getLineCut (CCPoint triggerPos, CCPoint lowestPoint, CCPoint highestPoint) { // thanks chatgpt for explaing me this shit for like an hour :sob:
+        CCPoint centerPos = ccp(lowestPoint.x + ((highestPoint.x - lowestPoint.x) / 2), lowestPoint.y + ((highestPoint.y - lowestPoint.y) / 2));
         CCPoint direction = ccp(centerPos.x - triggerPos.x, centerPos.y - triggerPos.y);
         CCPoint intersection = centerPos;
         float cutAtT = 1.0f;
@@ -295,8 +309,63 @@ class $modify(Editor, LevelEditorLayer) {
         return intersection;
     }
 
-    void updateEditor(float p0) { // this works surprisingly well lol
-        LevelEditorLayer::updateEditor(p0);
+    std::vector<std::vector<GameObject*>> getClusters(std::vector<GameObject*> objs, float distance) {
+        std::unordered_map<GameObject*, int> clusterMap;
+        std::vector<std::vector<GameObject*>> clusters;
+        for (auto obj : objs) {
+            auto pos = obj->getPosition();
+            auto objCluster = -1;
+            clusterMap.insert({obj, objCluster});
+            for (auto neighbourObj : objs) {
+                auto neighbourPos = neighbourObj->getPosition();
+                if (neighbourObj == obj) {
+                    if (objCluster == -1) {
+                        objCluster = clusters.size();
+                        clusters.emplace_back(std::vector<GameObject*>{obj});
+                        clusterMap[obj] = objCluster;
+                    }
+                    continue;
+                }
+                if (std::abs(pos.x - neighbourPos.x) <= distance && std::abs(pos.y - neighbourPos.y) <= distance) {
+                    if (clusters.size() != 0 && clusterMap.contains(neighbourObj)) {
+                        auto neighbourObjCluster = clusterMap[neighbourObj];
+                        if (objCluster == -1) {
+                            clusters[neighbourObjCluster].push_back(obj);
+                            objCluster = neighbourObjCluster;   
+                            clusterMap[obj] = neighbourObjCluster;
+                        } else if (neighbourObjCluster != objCluster) {
+                            auto& neighbourObjClusterVector = clusters[neighbourObjCluster];
+                            for (auto currentObj : clusters[objCluster]) {
+                                neighbourObjClusterVector.push_back(currentObj);
+                                clusterMap[currentObj] = neighbourObjCluster;
+                            }
+                            clusters.erase(clusters.begin() + objCluster);
+                            objCluster = neighbourObjCluster;
+                        }
+                    } else {
+                        if (objCluster == -1) {
+                            objCluster = clusters.size();
+                            clusters.emplace_back(std::vector<GameObject*>{obj, neighbourObj});
+                            clusterMap.insert({neighbourObj, objCluster});
+                            clusterMap[obj] = objCluster;  
+                        } else {
+                            clusters[objCluster].push_back(neighbourObj);
+                            clusterMap.insert({neighbourObj, objCluster});
+                        }
+                    }
+                }
+            }
+        }
+        return clusters;
+        //return std::vector<std::vector<GameObject*>>();
+    }
+    
+    void unlockIndicatorUpdates(float dt) {
+        m_fields->indicatorUpdateLock = false;
+    }
+    
+    void updateDebugDraw() { // this works surprisingly well lol
+        LevelEditorLayer::updateDebugDraw();
         auto& lastObjectCount = m_fields->lastObjectCount;
         auto objCount = m_objects->count();
         if (lastObjectCount != objCount) updateAllIndicators();
@@ -309,19 +378,24 @@ class $modify(EditUI, EditorUI) {
         bool updateMoveLock = false;
     };
 
-    void selectObject(GameObject* p0, bool p1) { //test with update buttons to replace hese and make undo/redo work
+    void selectObject(GameObject* p0, bool p1) { //test with update buttons to replace these and make undo/redo work
         EditorUI::selectObject(p0, p1);
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+        this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
+    }
+
+    void selectObjects(CCArray* p0, bool p1) { //test with update buttons to replace these and make undo/redo work
+        EditorUI::selectObjects(p0, p1);
+        this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
     }
 
     void deselectObject(GameObject* p0) {
         EditorUI::deselectObject(p0);
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+        this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
     }
 
     void deselectAll() {
         EditorUI::deselectAll();
-        static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
+        this->scheduleOnce(schedule_selector(EditUI::delayedUpdateAllIndicators), 0);
     }
 
     void moveObject(GameObject* p0, CCPoint p1) {
@@ -332,22 +406,9 @@ class $modify(EditUI, EditorUI) {
         }
     }
 
-    void delayedUpdateAllIndicators(float dt) { // so moving crazy amounts of objects doesnt make the game cry
+    void delayedUpdateAllIndicators(float dt) { // so moving crazy amounts of objects doesnt make the game cry, and also some of these functions dont update somehow wtf
         static_cast<Editor*>(LevelEditorLayer::get())->updateAllIndicators();
         m_fields->updateMoveLock = false;
-    }
-};
-
-class $modify(Obj, GameObject) {
-    int addToGroup(int p0) {
-        auto ret = GameObject::addToGroup(p0);
-        if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
-        return ret;
-    }
-
-    void removeFromGroup(int p0) {
-        GameObject::removeFromGroup(p0);
-        if (auto editor = static_cast<Editor*>(LevelEditorLayer::get())) editor->updateAllIndicators();
     }
 };
 

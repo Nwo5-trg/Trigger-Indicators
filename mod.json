@@ -7,7 +7,7 @@
 	},
 	"id": "nwo5.trigger_indicators",
 	"name": "Trigger Indicators",
-	"version": "v0.1.0-alpha.3",
+	"version": "v0.1.0-alpha.4",
 	"developer": "Nwo5",
 	"description": "Indicators showing what triggers activate.",
 	"tags": ["offline", "editor", "enhancement", "utility"],
@@ -25,6 +25,17 @@
 		"enable-trigger-only": {
 			"type": "bool",
 			"name": "Trigger Only Mode Enabled",
+			"default": false
+		},
+		"enable-clustering": {
+			"type": "bool",
+			"name": "Clustering Enabled",
+			"default": true
+		},
+		"enable-draw-individual-lines": {
+			"type": "bool",
+			"name": "Draw Individual Lines Enabled",
+			"description": "Overrides clustering, draws lines to *every* object instead of clustering or grouping them all together.",
 			"default": false
 		},
 		"configuration-label": {
@@ -54,6 +65,24 @@
 			"description": "Max distance an object can be from a trigger before lines stop rendering (lines render no matter the distance when the trigger is selected)",
 			"min": 1,
 			"max": 10000
+		},
+		"max-cluster-object-check": {
+			"type": "int",
+			"name": "Max Cluster Object Check",
+			"description": "Max amount of objects in a group before clustering gets overriden (for performance reasons, anything above 50 *will* be laggy)",
+			"default": 50,
+			"min": 0,
+			"max": 10000,
+			"enable-if": "enable-clustering"
+		},
+		"cluster-limit": {
+			"type": "float",
+			"name": "Cluster Limit",
+			"description": "Max distance an object can be from another to be clustered (from the center)",
+			"default": 60,
+			"min": 10,
+			"max": 450,
+			"enable-if": "enable-clustering"
 		},
 		"line-width": {
 			"type": "float",
